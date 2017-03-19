@@ -1,0 +1,178 @@
+#!/bin/bash
+# Joshua Hesseltine
+# cs 344 Program #1 
+# stats file will:
+# check for the right number and format of arguments to stats. 
+# check to allow users to abbreviate -rows and -cols; 
+# any word beginning with a hyphen and then a lowercase r or c is accepted
+# too many or two few arguments or if the arguments of the wrong format stats will output error message standard error  
+# output error message to stderr if an input file is specified, but is not readable
+# output statistics to stdout in testable format
+# all error messages are sent to stderr
+# if input_file is empty stats sends an informational message to stderr and exits
+# handles data with any reasonable number of rows or columns; > 1000 bytes
+# creates temp files and deletes after each run of main function
+# all values and results are whole numbers 
+
+# sources used:
+# http://superuser.com/questions/747884/how-to-write-a-script-that-accepts-input-from-a-file-or-from-stdin
+# http://stackoverflow.com/questions/1886157/a-simple-small-shell-script-to-compute-averages
+# http://tldp.org/LDP/Bash-Beginners-Guide/html/sect_11_02.html
+# http://stackoverflow.com/questions/3510275/sorting-in-bash
+
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
+#global variables
+sum=0 
+avg=0 
+median=0 
+count=0
+input_file="" #canned 
+
+temp1=$$_temp1
+temp2=$$_temp2
+temp_input_file=$$_temp3
+
+# remove temp files
+trap "rm -rf $temp1 $temp2 $temp_input_file; exit 1" INT HUP TERM
+
+createFile()
+{
+	while read line
+	do
+		echo -e "$line" >> $temp_input_file
+	done < /dev/stdin
+	input_file=$temp_input_file
+};
+
+calculateAvg()
+{
+	# verify it's not a zero, else re-set
+	if(($1==0)) # $1 is count global
+	then
+		avg=""
+	# calculate the average
+	else
+		((avg = (($2 + ($1 / 2)) / $1 ))) # $2 is sum global
+	fi		
+};
+     
+calculateMed()
+{
+	# sort -g sorts linearly 
+	sorted=$(echo $2 | tr " " "\n" | sort -g | tr "\n" " ")  		# $2 == sum 
+	middle=$((($1 / 2) + 1))  																	# $1 is count
+	median=$(echo $sorted | cut -d " " -f $middle)
+};
+
+# main
+# checks argument type and correct number of arguments                       
+# if arguments are incorrect will print error message to shell
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]
+then
+	echo "stats {-rows | -cols} [file]" >&2
+	exit 1
+fi
+
+if [ "$2" == "" ]
+then
+		createFile
+else
+	if [ ! -r "$2" ]
+	then
+		echo "Can't read file"
+		exit 1
+	else
+		input_file=$2
+	fi
+fi
+
+#check if user wants rows or columns
+if [[ "$1" == -r* ]] #*wildcard anything that starts with -r (e.g. -rrerdd)
+then
+	echo "Average	Median" # print to shell
+	while read line	# if line exists 
+	do
+		# with each new line
+		# pipe new line with tab '\t' and carrage return '\n'
+		rowValue=$(echo $line | tr "\t" "\n") # pipe new line with tab '\t' 
+		# reset globals to 0 for each new line
+		avg=0
+		sum=0
+		count=0
+		for currentValue in $rowValue
+		do
+			sum=$(expr $sum + $currentValue)
+			((++count))
+		done
+		# calculate avergae passing count and sum
+		calculateAvg $count $sum
+		#declare temp file to pass
+		passfile=$PF
+		PF=$''
+		#calculate median by passing count and rowValue
+		calculateMed $count $rowValue
+		# do it again
+		passfile=$PFagain
+		# print
+		echo -e "$avg\t$median"
+	done < "$input_file"
+	
+elif [[ "$1" == -c* ]] #*wildcard anything that starts with -c (e.g. -cumbaya)
+then
+	total_columns=$(head -n 1 $input_file | wc -w) # take total number of coulmns from header in the file (i.e first line)
+	for i in $(seq 1 $total_columns)
+	do
+		# for each column extract that value and save as total_values
+		total_values=$(cut -f $i $input_file | tr "\t" "\n")
+		sum=0
+		# each number in total_values
+		for num in $total_values
+		do
+			set +e # in case sum ++ 0
+			sum=$(expr $sum + $num)
+			set -e 
+		done
+		
+		count=($(echo $total_values | wc -w)) # set count
+		# pass to calculateAvg by passing count and sum
+		calculateAvg $count $sum
+		tempIFS=$IFS
+		IFS=$''
+		calculateMed $count $total_values
+		IFS=$tempIFS
+		# store results
+		if [ $i -eq 1 ]
+		then
+			echo $avg >> $temp1
+			echo $median >> $temp2
+		else
+			sed -e "s/$/	$avg/" -i $temp1
+			sed -e "s/$/	$median/" -i $temp2
+		fi
+	done
+	
+	# Print off the results
+	if [[ -s $input_file ]]
+	then
+		echo "Averages:"
+		cat $temp1
+		echo "Medians:"
+		cat $temp2
+	else
+		echo "Averages:"
+		echo "Medians:"
+	fi
+else
+	echo "stats {-rows | -cols} [file]" >&2
+	exit 1
+fi
+
+#delete the temp files
+rm -rf $temp1 $temp2 $temp_input_file
+
+exit 0	
+
+
